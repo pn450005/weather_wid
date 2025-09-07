@@ -1,0 +1,259 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Kawaii Weather Widget</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <style>
+      html, body { height: 100%; }
+      body { margin: 0; display: grid; place-items: center; background: transparent; }
+    </style>
+  </head>
+  <body>
+    <div id="root" style="width: 420px"></div>
+
+    <script type="text/babel">
+      const THEMES = {
+        pink: { bgFrom: "from-pink-50", bgTo: "to-rose-100", card: "bg-white/70", accent: "#FF6AA9", text: "#6B2A4A", sun: "#FFD1E6", moon: "#E6D5FF", cloud: "#FFF6FB", rain: "#8AC6FF", thunder: "#FFB347", snow: "#C2E9FB", fog: "#EADCFB", stroke: "#F092C1" },
+      };
+      const DEFAULT_COORDS = { lat: 40.9257, lon: -73.1409 }; // Stony Brook, NY
+      const toF = (c) => c * 1.8 + 32;
+      const fmtTemp = (c, unit) => Math.round(unit === 'F' ? toF(c) : c);
+      const guessIsDay = () => { const h = new Date().getHours(); return h >= 6 && h < 18; };
+      function adjustConditionForDayNight(cond, isDay){
+        if (cond === 'clear-day' || cond === 'clear-night') return isDay ? 'clear-day' : 'clear-night';
+        if (cond === 'partly-cloudy-day' || cond === 'partly-cloudy-night') return isDay ? 'partly-cloudy-day' : 'partly-cloudy-night';
+        return cond;
+      }
+      function wmoToCondition(code, isDay){
+        if (code === 0) return isDay ? 'clear-day' : 'clear-night';
+        if (code === 1 || code === 2) return isDay ? 'partly-cloudy-day' : 'partly-cloudy-night';
+        if (code === 3) return 'cloudy';
+        if ([45,48].includes(code)) return 'fog';
+        if ([51,53,55,56,57,61,63,65,80,81,82].includes(code)) return 'rain';
+        if ([66,67,71,73,75,77,85,86].includes(code)) return 'snow';
+        if ([95,96,99].includes(code)) return 'thunderstorm';
+        return isDay ? 'partly-cloudy-day' : 'partly-cloudy-night';
+      }
+
+      const SunIcon = ({ color, stroke, face }) => (
+        <svg viewBox="0 0 96 96" width="96" height="96" className="overflow-visible">
+          <circle cx="48" cy="48" r="18" fill={color} stroke={stroke} strokeWidth="2" />
+          {Array.from({ length: 8 }).map((_, i) => {
+            const angle = (i * Math.PI) / 4;
+            const x1 = 48 + Math.cos(angle) * 28;
+            const y1 = 48 + Math.sin(angle) * 28;
+            const x2 = 48 + Math.cos(angle) * 42;
+            const y2 = 48 + Math.sin(angle) * 42;
+            return <line key={i} x1={x1} y1={y1} x2={x2} y2={y2} stroke={stroke} strokeWidth="4" strokeLinecap="round" />;
+          })}
+          {face && (
+            <g>
+              <circle cx="42" cy="50" r="2.2" fill="#3a2a2a" />
+              <circle cx="54" cy="50" r="2.2" fill="#3a2a2a" />
+              <path d="M43 56 Q48 60 53 56" fill="none" stroke="#3a2a2a" strokeWidth="2.5" strokeLinecap="round" />
+            </g>
+          )}
+        </svg>
+      );
+      const MoonIcon = ({ color, stroke, face }) => (
+        <svg viewBox="0 0 96 96" width="96" height="96" className="overflow-visible">
+          <path d="M62 21a28 28 0 1 0 0 54 24 24 0 1 1 0-54z" fill={color} stroke={stroke} strokeWidth="2" />
+          {face && (
+            <g transform="translate(-4 6)">
+              <circle cx="54" cy="48" r="2.1" fill="#3a2a2a" />
+              <circle cx="64" cy="48" r="2.1" fill="#3a2a2a" />
+              <path d="M56 54 Q59 57 62 54" fill="none" stroke="#3a2a2a" strokeWidth="2.4" strokeLinecap="round" />
+            </g>
+          )}
+        </svg>
+      );
+      const CloudShape = ({ fill, stroke, w = 140, h = 90, face }) => (
+        <svg viewBox="0 0 160 100" width={w} height={h} className="overflow-visible">
+          <path d="M28 76 Q16 76 16 62 Q16 48 30 46 Q36 32 54 32 Q66 32 74 38 Q80 28 94 28 Q112 28 118 44 Q134 46 134 62 Q134 82 114 82 H46 Q28 82 28 76 Z" fill={fill} stroke={stroke} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
+          {face && (
+            <g transform="translate(80,62)">
+              <circle cx="-6" cy="0" r="3" fill="#3a2a2a" />
+              <circle cx="6" cy="0" r="3" fill="#3a2a2a" />
+              <path d="M-3 8 Q0 12 3 8" fill="none" stroke="#3a2a2a" strokeWidth="2.5" strokeLinecap="round" />
+            </g>
+          )}
+        </svg>
+      );
+      const Droplet = ({ fill, cx, cy, size = 12, stroke }) => (
+        <path d={`M ${cx} ${cy - size * 0.6} C ${cx - size * 0.5} ${cy - size * 0.1}, ${cx - size * 0.5} ${cy + size * 0.5}, ${cx} ${cy + size * 0.8} C ${cx + size * 0.5} ${cy + size * 0.5}, ${cx + size * 0.5} ${cy - size * 0.1}, ${cx} ${cy - size * 0.6} Z`} fill={fill} stroke={stroke} strokeWidth={1.5} />
+      );
+      const BoltInsideCloud = ({ fill, stroke }) => (
+        <path d="M82 46 L70 68 H84 L76 90 L96 62 H82 Z" fill={fill} stroke={stroke} strokeWidth="2" strokeLinejoin="round" />
+      );
+      const FogBars = ({ color }) => (
+        <g>
+          <rect x="36" y="84" width="66" height="4" rx="2" fill={color} />
+          <rect x="48" y="92" width="54" height="4" rx="2" fill={color} />
+          <rect x="24" y="100" width="78" height="4" rx="2" fill={color} />
+        </g>
+      );
+      const TwinkleStar = ({ x, y, scale = 1, fill = '#fff', stroke = '#F0C6DE' }) => (
+        <g transform={`translate(${x}, ${y}) scale(${scale})`}>
+          <path d="M0 -3 L1 -1 L3 0 L1 1 L0 3 L-1 1 L-3 0 L-1 -1 Z" fill={fill} stroke={stroke} strokeWidth="0.5" />
+        </g>
+      );
+      const StarsNight = ({ stroke = '#F0C6DE' }) => (
+        <svg viewBox="0 0 160 120" className="absolute left-0 top-0 overflow-visible" width="160" height="120" aria-hidden>
+          <TwinkleStar x={24} y={18} scale={0.9} stroke={stroke} />
+          <TwinkleStar x={46} y={10} scale={0.7} stroke={stroke} />
+          <TwinkleStar x={18} y={36} scale={0.6} stroke={stroke} />
+        </svg>
+      );
+      const IconPartlyDay = ({ t, face }) => (
+        <div className="relative">
+          <div className="absolute -left-2 -top-2"><SunIcon color={t.sun} stroke={t.stroke} face={face} /></div>
+          <div className="relative z-10"><CloudShape fill={t.cloud} stroke={t.stroke} face={face} /></div>
+        </div>
+      );
+      const IconPartlyNight = ({ t, face }) => (
+        <div className="relative">
+          <StarsNight stroke={t.stroke} />
+          <div className="absolute -left-2 -top-2"><MoonIcon color={t.moon} stroke={t.stroke} face={face} /></div>
+          <div className="relative z-10"><CloudShape fill={t.cloud} stroke={t.stroke} face={face} /></div>
+        </div>
+      );
+      const IconClearNight = ({ t, face }) => (
+        <div className="relative">
+          <StarsNight stroke={t.stroke} />
+          <MoonIcon color={t.moon} stroke={t.stroke} face={face} />
+        </div>
+      );
+      const IconCloudy = ({ t, face }) => <CloudShape fill={t.cloud} stroke={t.stroke} face={face} />;
+      const IconRain = ({ t, face }) => (
+        <div className="relative">
+          <CloudShape fill={t.cloud} stroke={t.stroke} face={face} />
+          <svg viewBox="0 0 160 120" className="absolute left-0 top-0 overflow-visible" width="160" height="120">
+            <Droplet cx={70} cy={96} fill={t.rain} stroke={t.stroke} />
+            <Droplet cx={94} cy={102} fill={t.rain} stroke={t.stroke} />
+            <Droplet cx={118} cy={96} fill={t.rain} stroke={t.stroke} />
+          </svg>
+        </div>
+      );
+      const IconThunderstorm = ({ t, face }) => (
+        <div className="relative">
+          <CloudShape fill={t.cloud} stroke={t.stroke} face={face} />
+          <svg viewBox="0 0 160 120" className="absolute left-0 top-0 overflow-visible" width="160" height="120">
+            <BoltInsideCloud fill={t.thunder} stroke={t.stroke} />
+            <Droplet cx={86} cy={104} fill={t.rain} stroke={t.stroke} />
+            <Droplet cx={106} cy={98} fill={t.rain} stroke={t.stroke} />
+          </svg>
+        </div>
+      );
+      const IconSnow = ({ t, face }) => (
+        <div className="relative">
+          <CloudShape fill={t.cloud} stroke={t.stroke} face={face} />
+          <svg viewBox="0 0 160 120" className="absolute left-0 top-0 overflow-visible" width="160" height="120">
+            {[[86,98],[106,104],[126,98]].map(([x,y], i) => (
+              <g key={i} transform={`translate(${x}, ${y})`}>
+                <circle r="3" fill={t.snow} />
+                <path d="M0 -6 V6 M-6 0 H6 M-4 -4 L4 4 M4 -4 L-4 4" stroke={t.stroke} strokeWidth="1" />
+              </g>
+            ))}
+          </svg>
+        </div>
+      );
+      const IconFog = ({ t, face }) => (
+        <div className="relative">
+          <CloudShape fill={t.cloud} stroke={t.stroke} face={face} />
+          <svg viewBox="0 0 160 120" className="absolute left-0 top-0 overflow-visible" width="160" height="120">
+            <FogBars color={t.fog} />
+          </svg>
+        </div>
+      );
+      const Badge = ({ text, color }) => (
+        <span className="text-[11px] px-2 py-1 rounded-full border inline-flex items-center gap-1" style={{ borderColor: color + '55', color: color, background: color + '10' }}>{text}</span>
+      );
+
+      function KawaiiWeatherWidget({
+        unit = 'F', theme = 'pink', showFaces = true, rounded = '2xl', showBadges = false,
+        city, autoDayNight = true, isDayOverride, lat, lon, showError = false,
+      }){
+        const t = THEMES[theme] || THEMES.pink;
+        const [fetched, setFetched] = React.useState(null);
+        const [loading, setLoading] = React.useState(false);
+        const [error, setError] = React.useState(null);
+
+        React.useEffect(() => {
+          const la = lat ?? DEFAULT_COORDS.lat; const lo = lon ?? DEFAULT_COORDS.lon;
+          let aborted = false;
+          (async () => {
+            try{
+              setLoading(true); setError(null);
+              const forecastUrl = `https://api.open-meteo.com/v1/forecast?latitude=${la}&longitude=${lo}&current=temperature_2m,weather_code,is_day&daily=temperature_2m_max,temperature_2m_min&timezone=auto`;
+              const geoUrl = `https://geocoding-api.open-meteo.com/v1/reverse?latitude=${la}&longitude=${lo}&language=en`;
+              const [resF, resG] = await Promise.all([fetch(forecastUrl), fetch(geoUrl)]);
+              const json = resF.ok ? await resF.json() : null; const geo = resG.ok ? await resG.json() : null;
+              if (aborted) return;
+              const place = geo?.results?.[0];
+              const loc = city || (place ? `${place.name}${place.admin1 ? ', ' + place.admin1 : place.country_code ? ', ' + place.country_code : ''}` : `Lat ${la.toFixed(2)}, Lon ${lo.toFixed(2)}`);
+              const cond = wmoToCondition(json?.current?.weather_code ?? 1, !!json?.current?.is_day);
+              setFetched({ condition: cond, tempC: json?.current?.temperature_2m ?? 20, highC: json?.daily?.temperature_2m_max?.[0], lowC: json?.daily?.temperature_2m_min?.[0], location: loc, updatedAt: new Date().toISOString(), isDay: !!json?.current?.is_day });
+            }catch(e){ if (!aborted) setError(e?.message || 'Failed to fetch weather'); }
+            finally{ if (!aborted) setLoading(false); }
+          })();
+          return () => { aborted = true; };
+        }, [lat, lon, city]);
+
+        const data = fetched ?? { condition: 'partly-cloudy-day', tempC: 22, highC: 25, lowC: 18, location: city || 'Stony Brook, NY' };
+        const isDay = typeof isDayOverride === 'boolean' ? isDayOverride : (data.isDay ?? guessIsDay());
+        const condForIcon = autoDayNight ? adjustConditionForDayNight(data.condition, isDay) : data.condition;
+        const title = React.useMemo(() => ({ 'clear-day':'Clear', 'clear-night':'Clear night', 'partly-cloudy-day':'Partly cloudy', 'partly-cloudy-night':'Partly cloudy night', cloudy:'Cloudy', rain:'Rain', thunderstorm:'Thunderstorm', snow:'Snow', fog:'Fog' })[condForIcon], [condForIcon]);
+
+        const tempNow = fmtTemp(data.tempC, unit);
+        const tempHigh = data.highC != null ? fmtTemp(data.highC, unit) : null;
+        const tempLow  = data.lowC  != null ? fmtTemp(data.lowC, unit)  : null;
+        const roundedClass = { lg: 'rounded-lg', xl: 'rounded-xl', '2xl': 'rounded-2xl' }[rounded] || 'rounded-2xl';
+
+        const icon = React.useMemo(() => {
+          const props = { t, face: showFaces };
+          switch (condForIcon){
+            case 'clear-day': return <SunIcon color={t.sun} stroke={t.stroke} face={showFaces} />;
+            case 'clear-night': return <div className="relative"><StarsNight stroke={t.stroke} /><MoonIcon color={t.moon} stroke={t.stroke} face={showFaces} /></div>;
+            case 'partly-cloudy-day': return <IconPartlyDay {...props} />;
+            case 'partly-cloudy-night': return <IconPartlyNight {...props} />;
+            case 'cloudy': return <IconCloudy {...props} />;
+            case 'rain': return <IconRain {...props} />;
+            case 'thunderstorm': return <IconThunderstorm {...props} />;
+            case 'snow': return <IconSnow {...props} />;
+            case 'fog': return <IconFog {...props} />;
+            default: return <IconPartlyDay {...props} />;
+          }
+        }, [condForIcon, showFaces, t]);
+
+        return (
+          <div className={[ 'w-full max-w-md mx-auto', 'bg-gradient-to-br', THEMES.pink.bgFrom, THEMES.pink.bgTo, 'p-1', roundedClass, 'shadow-[0_8px_30px_rgba(0,0,0,0.06)]' ].join(' ')}>
+            <div className={[THEMES.pink.card, 'backdrop-blur-md', 'p-4', roundedClass].join(' ')}>
+              <div className="flex items-center gap-3">
+                <div className="shrink-0"><div className="w-[160px] h-[120px] flex items-center justify-center">{icon}</div></div>
+                <div className="min-w-0">
+                  <div className="text-sm opacity-70" style={{ color: THEMES.pink.text }}>{data.location || 'Stony Brook, NY'}</div>
+                  <div className="flex items-end gap-3">
+                    <div className="text-5xl font-black tracking-tight" style={{ color: THEMES.pink.accent }}>{tempNow}°{unit}</div>
+                    <div className="text-sm font-medium" style={{ color: THEMES.pink.text }}>
+                      {tempHigh != null && tempLow != null ? (<span>H {tempHigh}° / L {tempLow}°</span>) : null}
+                    </div>
+                  </div>
+                  <div className="mt-1 text-base font-semibold" style={{ color: THEMES.pink.text }}>{title}</div>
+                  {false && <div className="mt-1 text-xs text-red-500">Couldn’t fetch weather. Showing sample.</div>}
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      }
+
+      const root = ReactDOM.createRoot(document.getElementById('root'));
+      root.render(<KawaiiWeatherWidget />);
+    </script>
+  </body>
+</html>
